@@ -416,15 +416,21 @@ static esp_err_t data_pull_handler(httpd_req_t *req)
 
     uint32_t emitted = 0;
     bool first = true;
-    char chunk[160];
+    char chunk[224];
     if (has_data) {
         do {
             sample_record_t rec;
             if (read_record(sector, offset, &rec) == ESP_OK &&
                 rec.utc_ts != ERASED_TS && rec.utc_ts > since) {
+                /* heartbeat_bpm/heartbeat_conf: experimental — CSI-only
+                 * heart rate is much less reliable than presence/motion/
+                 * breathing (see QFLAG_HEARTBEAT_VALID, a binary plausible-
+                 * range check, not a real confidence score). Included so
+                 * the PC-side UI can decide how to present it, not hidden. */
                 int len = snprintf(chunk, sizeof(chunk),
                     "%s{\"ts\":%lu,\"presence\":%.3f,\"motion\":%.3f,"
                     "\"respiration_bpm\":%.2f,\"respiration_conf\":%.3f,"
+                    "\"heartbeat_bpm\":%.1f,\"heartbeat_conf\":%.3f,"
                     "\"quality_flags\":%u}",
                     first ? "" : ",",
                     (unsigned long)rec.utc_ts,
@@ -432,6 +438,8 @@ static esp_err_t data_pull_handler(httpd_req_t *req)
                     (double)rec.pkt.motion_score,
                     (double)rec.pkt.respiration_bpm,
                     (double)rec.pkt.respiration_conf,
+                    (double)rec.pkt.heartbeat_bpm,
+                    (double)rec.pkt.heartbeat_conf,
                     (unsigned)rec.pkt.quality_flags);
                 httpd_resp_send_chunk(req, chunk, len);
                 first = false;
