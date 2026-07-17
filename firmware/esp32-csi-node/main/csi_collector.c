@@ -386,7 +386,38 @@ static void wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type)
  * Espressif's esp-csi csi_recv_router reference.
  */
 static esp_ping_handle_t s_self_ping = NULL;
-static void csi_ping_cb_noop(esp_ping_handle_t hdl, void *args) { (void)hdl; (void)args; }
+static volatile uint32_t s_ping_success_count = 0;
+static volatile uint32_t s_ping_timeout_count = 0;
+static volatile uint32_t s_ping_end_count = 0;
+
+static void csi_ping_cb_success(esp_ping_handle_t hdl, void *args)
+{
+    (void)hdl; (void)args;
+    s_ping_success_count++;
+}
+
+static void csi_ping_cb_timeout(esp_ping_handle_t hdl, void *args)
+{
+    (void)hdl; (void)args;
+    s_ping_timeout_count++;
+}
+
+static void csi_ping_cb_end(esp_ping_handle_t hdl, void *args)
+{
+    (void)hdl; (void)args;
+    s_ping_end_count++;
+    ESP_LOGW(TAG, "self-ping: session ended (success=%lu timeout=%lu end#=%lu) — restarting",
+             (unsigned long)s_ping_success_count, (unsigned long)s_ping_timeout_count,
+             (unsigned long)s_ping_end_count);
+    /* esp_ping sessions can terminate on transient errors even with
+     * COUNT_INFINITE (e.g. ARP failure); clear the handle so
+     * csi_start_self_ping() can create a fresh session on the next tick. */
+    s_self_ping = NULL;
+}
+
+uint32_t csi_collector_get_ping_success_count(void) { return s_ping_success_count; }
+uint32_t csi_collector_get_ping_timeout_count(void) { return s_ping_timeout_count; }
+uint32_t csi_collector_get_ping_end_count(void) { return s_ping_end_count; }
 
 static void csi_start_self_ping(void)
 {
@@ -417,9 +448,9 @@ static void csi_start_self_ping(void)
 
     esp_ping_callbacks_t cbs = {
         .cb_args         = NULL,
-        .on_ping_success = csi_ping_cb_noop,
-        .on_ping_timeout = csi_ping_cb_noop,
-        .on_ping_end     = csi_ping_cb_noop,
+        .on_ping_success = csi_ping_cb_success,
+        .on_ping_timeout = csi_ping_cb_timeout,
+        .on_ping_end     = csi_ping_cb_end,
     };
 
     if (esp_ping_new_session(&cfg, &cbs, &s_self_ping) == ESP_OK && s_self_ping != NULL) {
