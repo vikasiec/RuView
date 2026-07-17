@@ -35,6 +35,7 @@
 
 #include "sample_buffer.h"
 
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
 #include "esp_log.h"
@@ -56,11 +57,17 @@ static const char *TAG = "sample_buffer";
  * that happen to not equal the 0xFFFFFFFF "erased" marker our recovery
  * scan relies on. A single NVS flag (one write, ever — not per-record,
  * no wear concern) lets us force a full-partition erase exactly once per
- * firmware image, so recover_cursor() can trust "0xFFFFFFFF means never
+ * partition layout, so recover_cursor() can trust "0xFFFFFFFF means never
  * written" from then on.
+ *
+ * The key is derived from the partition's size rather than a fixed
+ * string: whenever partitions_display.csv grows/shrinks this partition
+ * (as it just did, 0x1E0000 -> 0x3E0000), the old key silently stops
+ * matching and a fresh full erase runs automatically — otherwise the
+ * newly-exposed region would keep whatever leftover bytes were already
+ * there, reintroducing the exact garbage-data bug this was built to fix.
  */
 #define FORMAT_NVS_NAMESPACE "sample_buf"
-#define FORMAT_NVS_KEY       "formatted_v1"
 
 typedef struct __attribute__((packed)) {
     uint32_t utc_ts;           /* Seconds since epoch (wall clock), 0 if unsynced. */
@@ -113,6 +120,11 @@ static uint32_t scan_sector_fill(uint32_t sector)
  */
 static esp_err_t ensure_partition_formatted(void)
 {
+    /* NVS keys are capped at 15 chars; a hex size fits comfortably
+     * ("fmt_3e0000" = 10 chars) and stays unique per distinct layout. */
+    char key[16];
+    snprintf(key, sizeof(key), "fmt_%lx", (unsigned long)s_part->size);
+
     nvs_handle_t nvs;
     esp_err_t err = nvs_open(FORMAT_NVS_NAMESPACE, NVS_READWRITE, &nvs);
     if (err != ESP_OK) {
@@ -120,14 +132,14 @@ static esp_err_t ensure_partition_formatted(void)
                  esp_err_to_name(err));
     } else {
         uint8_t formatted = 0;
-        esp_err_t get_err = nvs_get_u8(nvs, FORMAT_NVS_KEY, &formatted);
+        esp_err_t get_err = nvs_get_u8(nvs, key, &formatted);
         if (get_err == ESP_OK && formatted) {
             nvs_close(nvs);
-            return ESP_OK; /* Already formatted in a previous boot. */
+            return ESP_OK; /* Already formatted at this partition size. */
         }
     }
 
-    ESP_LOGI(TAG, "first boot with local buffering — erasing %lu-byte partition "
+    ESP_LOGI(TAG, "first boot at this partition size (%lu bytes) — erasing "
                   "(clears any leftover pre-existing flash contents)...",
              (unsigned long)s_part->size);
     esp_err_t erase_err = esp_partition_erase_range(s_part, 0, s_part->size);
@@ -138,7 +150,7 @@ static esp_err_t ensure_partition_formatted(void)
     ESP_LOGI(TAG, "partition erase complete");
 
     if (err == ESP_OK) {
-        nvs_set_u8(nvs, FORMAT_NVS_KEY, 1);
+        nvs_set_u8(nvs, key, 1);
         nvs_commit(nvs);
         nvs_close(nvs);
     }
