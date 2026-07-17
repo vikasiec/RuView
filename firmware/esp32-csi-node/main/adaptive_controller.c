@@ -19,6 +19,7 @@
 #include "edge_processing.h"
 #include "stream_sender.h"
 #include "csi_collector.h"
+#include "sample_buffer.h"
 
 #include <string.h>
 #include "freertos/FreeRTOS.h"
@@ -325,6 +326,11 @@ static void emit_feature_state(void)
     if (sent < 0) {
         ESP_LOGW(TAG, "feature_state emit failed");
     }
+
+    /* Persist to the local flash ring buffer independent of whether the
+     * live send above succeeded — this is what lets readings survive a
+     * PC that isn't listening at this exact moment (see sample_buffer.c). */
+    sample_buffer_append(&pkt);
 }
 
 static void slow_loop_cb(TimerHandle_t t)

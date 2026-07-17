@@ -170,6 +170,22 @@ menu "Adaptive Controller (ADR-081)"
 
 endmenu
 
+menu "Local Buffer & HTTP API"
+
+    config LOCAL_BUFFER_ENABLE
+        bool "Enable local flash buffer + HTTP pull API"
+        default y
+        help
+            Persist sensing output (rv_feature_state_t) to the unused
+            spiffs data partition so readings survive when nothing is
+            listening on the network for the live UDP stream. Adds
+            GET /data/status and GET /data/pull on the OTA HTTP server
+            (port 8032) so a PC/phone can retrieve buffered data later.
+            Requires the 8MB partition table (partitions_display.csv) —
+            disable on 4MB boards, which have no spare partition.
+
+endmenu
+
 menu "AMOLED Display (ADR-045)"
 
     config DISPLAY_ENABLE

@@ -15,6 +15,7 @@
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_netif_sntp.h"
 #include "nvs_flash.h"
 #include "esp_app_desc.h"
 #include "sdkconfig.h"
@@ -28,6 +29,7 @@
 #include "power_mgmt.h"
 #include "wasm_runtime.h"
 #include "wasm_upload.h"
+#include "sample_buffer.h"
 #include "display_task.h"
 #include "mmwave_sensor.h"
 #include "swarm_bridge.h"
@@ -61,6 +63,28 @@ static EventGroupHandle_t s_wifi_event_group;
 static int s_retry_num = 0;
 #define MAX_RETRY 10
 
+/* sample_buffer.c needs real wall-clock time to timestamp buffered
+ * records — the on-wire rv_feature_state_t only carries a boot-relative
+ * microsecond counter. Start once; re-connects just let the SNTP client
+ * re-sync in the background rather than restarting it. */
+static bool s_sntp_started = false;
+
+static void start_sntp_once(void)
+{
+    if (s_sntp_started) return;
+    s_sntp_started = true;
+
+    esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+    esp_err_t err = esp_netif_sntp_init(&config);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "SNTP init failed: %s (buffered records will be unstamped)",
+                 esp_err_to_name(err));
+        s_sntp_started = false;
+        return;
+    }
+    ESP_LOGI(TAG, "SNTP sync started (pool.ntp.org)");
+}
+
 static void event_handler(void *arg, esp_event_base_t event_base,
                           int32_t event_id, void *event_data)
 {
@@ -79,6 +103,7 @@ static void event_handler(void *arg, esp_event_base_t event_base,
         ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
         s_retry_num = 0;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+        start_sntp_once();
     }
 }
 
@@ -371,6 +396,19 @@ void app_main(void)
 #else
     esp_err_t ota_ret = ESP_ERR_NOT_SUPPORTED;
     ESP_LOGI(TAG, "Mock CSI mode: skipping OTA server (no network)");
+#endif
+
+    /* Local flash buffer + HTTP pull API (see sample_buffer.c) — lets
+     * sensing output survive when nothing is listening for the live UDP
+     * stream. Registers on the same HTTP server as OTA/WASM above. */
+#ifdef CONFIG_LOCAL_BUFFER_ENABLE
+    esp_err_t buf_ret = sample_buffer_start();
+    if (buf_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Local buffer init failed: %s (readings won't survive offline gaps)",
+                 esp_err_to_name(buf_ret));
+    } else if (ota_server != NULL) {
+        sample_buffer_http_register(ota_server);
+    }
 #endif
 
     /* ADR-040: Initialize WASM programmable sensing runtime. */

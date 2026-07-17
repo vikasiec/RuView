@@ -38,6 +38,7 @@ set(REQUIRES
     driver
     lwip
     mbedtls
+    esp_partition
 )
 
 # ADR-110: C6-only components — pulled in when building for esp32c6.
@@ -60,6 +61,11 @@ endif()
 
 if(CONFIG_WASM_ENABLE)
     list(APPEND REQUIRES wasm3)
+endif()
+
+# Local flash buffer + HTTP pull API (see main/sample_buffer.c)
+if(CONFIG_LOCAL_BUFFER_ENABLE)
+    list(APPEND SRCS "sample_buffer.c")
 endif()
 
 idf_component_register(

@@ -29,6 +29,11 @@ CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 # LWIP: enable extended socket options for UDP multicast
 CONFIG_LWIP_SO_RCVBUF=y
 
+# SNTP: sample_buffer.c needs real wall-clock time to stamp buffered
+# records meaningfully (the on-wire rv_feature_state_t only carries a
+# boot-relative microsecond counter). One server slot is enough.
+CONFIG_LWIP_SNTP_MAX_SERVERS=1
+
 # Issue (sibling of #946/#949/#864 cluster): UDP `sendto` returned ENOMEM
 # in a tight loop on both ESP32-S3 (COM8) and ESP32-C6 (COM9) at the v0.7.0
 # CSI packet rate (CSI cb + status + sync + feature_state all sharing the
